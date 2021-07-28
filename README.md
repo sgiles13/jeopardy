@@ -1,4 +1,4 @@
-# jeopardy
+# Jeopardy Question-and-Answer Database
 
 ![alt text](https://github.com/sgiles13/jeopardy/blob/main/jeopardy.png?raw=true)
 
