@@ -171,8 +171,9 @@ class EpisodeData(object):
                         'td', {'class': 'clue_value_daily_double'}).text.replace('DD: ', '').replace('$', '').replace(',','')))
                     dd_index.append(len(results)-1)
                 continue
-        num_clues = len(results)
+        num_clues = self.get_num_clues()
         self.dailydouble = self.get_dailydouble(dd_index, num_clues)
+        results.append(0) # provide clue value of 0 for FJ question (final scores are extracted for each player)
         return results
     def get_clue_no(self):
         results = []
@@ -192,6 +193,7 @@ class EpisodeData(object):
     def get_clue_loc(self):
         xcoord = []
         ycoord = []
+        clue_type = []
         for round in ['jeopardy_round', 'double_jeopardy_round']:
             souplist = self.soup.find('div', {'id': round}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
             #print('souplist = ', souplist)
@@ -199,12 +201,15 @@ class EpisodeData(object):
                 if round == 'jeopardy_round':
                     xcoord.append(int(x.find('td', {'class': 'clue_text'})['id'].split('clue_J_')[-1].split('_stuck')[0].split('_')[0]))
                     ycoord.append(int(x.find('td', {'class': 'clue_text'})['id'].split('clue_J_')[-1].split('_stuck')[0].split('_')[-1]))
+                    clue_type.append(1)
                 else:
                     xcoord.append(int(x.find('td', {'class': 'clue_text'})['id'].split('clue_DJ_')[-1].split('_stuck')[0].split('_')[0]))
                     ycoord.append(int(x.find('td', {'class': 'clue_text'})['id'].split('clue_DJ_')[-1].split('_stuck')[0].split('_')[-1]))
+                    clue_type.append(2)
         xcoord.append(0) #final jeopardy
-        ycoord.append(0) #final jeopardy             
-        return xcoord, ycoord
+        ycoord.append(0) #final jeopardy
+        clue_type.append(3)             
+        return xcoord, ycoord, clue_type
     def get_contestants(self):
         souplist = self.soup.find('div', {'id': 'contestants'}).find('table', {'id': 'contestants_table'}).find_all('p', {'class': 'contestants'})
         results = [x.find('a').text for x in souplist]
@@ -226,7 +231,7 @@ class EpisodeData(object):
     
     def get_contestant_totals(self, clue_value, responses):
         responses_nofj = responses[:(len(responses)-1)] # drop final jeopardy clue since this does not have an assigned clue value
-        earnings_matrix = np.transpose(np.transpose(responses_nofj)*np.array(clue_value))
+        earnings_matrix = np.transpose(np.transpose(responses_nofj)*np.array(clue_value[:-1]))
         earnings_matrix_cumsum = np.zeros(earnings_matrix.shape)
         for i in range(3):
             earnings_matrix_cumsum[:,i] = np.cumsum(earnings_matrix[:,i])
@@ -248,6 +253,23 @@ class EpisodeData(object):
         final_scores = np.array([cont1_final, cont2_final, cont3_final])
         return final_scores
 
+    def get_categories_list(self, xcoord, round, categories):
+        num_clues = self.get_num_clues()
+        categories_list = [[]]*num_clues
+        print()
+        for i, (q, r) in enumerate(zip(xcoord, round)):
+            if q == 0:
+                categories_list[i] = categories[-1]
+            else:
+                if r == 1:
+                    print(i, q)
+                    print(categories_list)
+                    categories_list[i] = categories[q - 1]
+                elif r == 2:
+                    categories_list[i] = categories[q + 5]
+
+        return categories_list
+
 def extract(episode_data):
     # Extract 'get' attributes from episode data. Save in tabular form. 
     # Test if 1st clue. If not, append to previous data.
@@ -256,7 +278,7 @@ def extract(episode_data):
 
     show_date = episode_data.get_show_date()
     contestants =  episode_data.get_contestants()
-    xcoord, ycoord = episode_data.get_clue_loc()
+    xcoord, ycoord, round = episode_data.get_clue_loc()
     clue_number = episode_data.get_clue_no()
     clue_value = episode_data.get_dollar_amt()
     categories = episode_data.get_categories()
@@ -277,8 +299,11 @@ def extract(episode_data):
     cont1_total = list(contestant_totals[:,0])
     cont2_total = list(contestant_totals[:,1])
     cont3_total = list(contestant_totals[:,2])
-    episode_data = [show_date, cont1, cont2, cont3, xcoord, ycoord, clue_number, clue_value, 
-    categories, clues, answers, dd, cont1_resp, cont2_resp, cont3_resp, cont1_total, cont2_total, cont3_total]
+    categories_list = episode_data.get_categories_list(xcoord, round, categories)
+    episode_data = [show_date, cont1, cont2, cont3, xcoord, ycoord, round, clue_number, clue_value, 
+    categories_list, clues, answers, dd, cont1_resp, cont2_resp, cont3_resp, cont1_total, cont2_total, cont3_total]
+    for i, data in enumerate(episode_data):
+        print(i, len(data))
     #print('episode data = ', episode_data[0])
     return episode_data
 
@@ -337,7 +362,7 @@ def main():
             #else:
             except UnboundLocalError:
                 labels = ['show_date', 'contestant1', 'contestant2', 'contestant3',
-                        'x_coord', 'y_coord', 'clue_number', 'clue_value', 
+                        'x_coord', 'y_coord', 'round', 'clue_number', 'clue_value', 
                         'category', 'question', 'answer', 'daily_double', 
                         'cont1_response', 'cont2_response', 'cont3_response',
                         'earnings1', 'earnings2', 'earnings3']
