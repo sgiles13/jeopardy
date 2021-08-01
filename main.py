@@ -285,7 +285,6 @@ def extract(episode_data):
     clues =  episode_data.get_clues()
     answers =  episode_data.get_answers()
     dd = episode_data.dailydouble
-    #print('dd = ', dd)
     responses = episode_data.get_responses()
     contestant_totals = episode_data.get_contestant_totals(clue_value, responses)
 
