@@ -142,6 +142,12 @@ class EpisodeData(object):
             else:
                 souplist = self.soup.find('div', {'id': round}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
                 for x in souplist:
+                    if 'Triple Stumper' in x.find('div')['onmouseover']:
+                        for j, cont in enumerate([cont1, cont2, cont3]):
+                            if cont in x.find('div')['onmouseover']:
+                                response_matrix[q_index, j] = -1
+                            else:
+                                pass
                     responses_table = x.find('div')['onmouseover'].split('<tr>')[-1].split('</tr')[0]
                     #print('responses_table = ', responses_table)
                     # Currently fails for a "Triple Stumper" clue. Need to fix this.
@@ -285,9 +291,9 @@ def extract(episode_data):
     clues =  episode_data.get_clues()
     answers =  episode_data.get_answers()
     dd = episode_data.dailydouble
-    #print('dd = ', dd)
     responses = episode_data.get_responses()
-    contestant_totals = episode_data.get_contestant_totals(clue_value, responses)
+    print('responses = ', responses)
+    #contestant_totals = episode_data.get_contestant_totals(clue_value, responses)
 
     show_date = [show_date.strftime('%Y-%m-%d')]*num_clues #Duplicate for all clues
     cont1 = [contestants[0]]*num_clues #Duplicate for all clues
@@ -296,15 +302,36 @@ def extract(episode_data):
     cont1_resp = list(responses[:,0])
     cont2_resp = list(responses[:,1])
     cont3_resp = list(responses[:,2])
+    # cont1_total = list(contestant_totals[:,0])
+    # cont2_total = list(contestant_totals[:,1])
+    # cont3_total = list(contestant_totals[:,2])
+    categories_list = episode_data.get_categories_list(xcoord, round, categories)
+
+    # episode_data = [show_date, cont1, cont2, cont3, xcoord, ycoord, round, clue_number, clue_value, 
+    # categories_list, clues, answers, dd, cont1_resp, cont2_resp, cont3_resp, cont1_total, cont2_total, cont3_total]
+    episode_data_list = [show_date, cont1, cont2, cont3, xcoord, ycoord, round, clue_number, clue_value, 
+    categories_list, clues, answers, dd, cont1_resp, cont2_resp, cont3_resp]   
+    episode_data_list = sort_clues(episode_data_list)
+
+    clue_value = episode_data_list[8]
+    cont1_resp = episode_data_list[-3]
+    cont2_resp = episode_data_list[-2]
+    cont3_resp = episode_data_list[-1]
+    responses = np.array([cont1_resp, cont2_resp, cont3_resp]).T
+
+    contestant_totals = episode_data.get_contestant_totals(clue_value, responses)
     cont1_total = list(contestant_totals[:,0])
     cont2_total = list(contestant_totals[:,1])
     cont3_total = list(contestant_totals[:,2])
-    categories_list = episode_data.get_categories_list(xcoord, round, categories)
-    episode_data = [show_date, cont1, cont2, cont3, xcoord, ycoord, round, clue_number, clue_value, 
-    categories_list, clues, answers, dd, cont1_resp, cont2_resp, cont3_resp, cont1_total, cont2_total, cont3_total]
-    for i, data in enumerate(episode_data):
+    episode_data_list.extend([cont1_total, cont2_total, cont3_total])
+    for i, data in enumerate(episode_data_list):
         print(i, len(data))
-    #print('episode data = ', episode_data[0])
+    return episode_data_list
+
+def sort_clues(episode_data):
+    sort_index = np.argsort(np.array(episode_data[7]))
+    for i, col in enumerate(episode_data):
+        episode_data[i] = [col[i] for i in sort_index]
     return episode_data
 
 def append_data(episode_list, episode_dict, labels):
