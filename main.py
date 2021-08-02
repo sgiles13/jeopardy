@@ -16,6 +16,8 @@ parser.add_argument('--load_episodes', action='store_true',
         help='load episode URLs from text file')
 parser.add_argument('--debug', action='store_true',
         help='if in debug mode, only scrapes first 10 episodes')
+parser.add_argument('--url', type=str, default=None,
+        help='url of episode to debug')
 parser.add_argument('--write_csv', action='store_true',
         help='write final data to CSV format')
 opt = parser.parse_args()
@@ -54,10 +56,11 @@ def get_links(url, item_type):
     if item_type == 'season':
         souplist = soup.find('div', {'id': 'content'}).find('table').find_all('a', href=True)
     elif item_type == 'episode':
-        souplist = soup.find('div', {'id': 'content'}).find('table').find_all('a', href=True)
-    item_list = []
-    for item in souplist:
-        item_list.append(item['href'])
+        souplist = soup.find('div', {'id': 'content'}).find('table').find_all('td', {'align': 'left'})
+        item_list = [x.find('a', href=True)['href'] for x in souplist]
+    # item_list = []
+    # for item in souplist:
+    #     item_list.append(item['href'])
     return item_list
 
 class EpisodeData(object):
@@ -86,22 +89,24 @@ class EpisodeData(object):
 
     def get_clues(self):
         souplist1 = self.soup.find('div', {'id': 'jeopardy_round'}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
-        results = [x.find('td', {'class': 'clue_text'}).text for x in souplist1]
+        results = [x.find('td', {'class': 'clue_text'}).text for x in souplist1 if x.find('td', {'class': 'clue_text'}) != None]
         souplist2 = self.soup.find('div', {'id': 'double_jeopardy_round'}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
-        results.extend([x.find('td', {'class': 'clue_text'}).text for x in souplist2])
+        results.extend([x.find('td', {'class': 'clue_text'}).text for x in souplist2 if x.find('td', {'class': 'clue_text'}) != None])
         souplist3 = self.soup.find('div', {'id': 'final_jeopardy_round'}).find('table', {'class': 'final_round'}).find('td', {'class': 'clue'}).find('td', {'class': 'clue_text'}).text
         results.extend([souplist3])
         return results
     
     def get_answers(self):
-        souplist1 = self.soup.find('div', {'id': 'jeopardy_round'}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
-        souplist1 = html2str(souplist1)
-        results = [x.split('correct_response&quot;&gt;')[-1].split('&lt')[0] for x in souplist1]
-        souplist2 = self.soup.find('div', {'id': 'double_jeopardy_round'}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
-        souplist2 = html2str(souplist2)
-        results.extend([x.split('correct_response&quot;&gt;')[-1].split('&lt')[0] for x in souplist2])
-        souplist3 = self.soup.find('div', {'id': 'final_jeopardy_round'}).find('table', {'class': 'final_round'}).find('td', {'class': 'category'}).find_all('div')
-        for a in souplist3:
+        for round in ['jeopardy_round', 'double_jeopardy_round']:
+            souplist = self.soup.find('div', {'id': round}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
+            souplist_str = html2str(souplist)
+            if round == 'jeopardy_round':
+                results = [x_str.split('correct_response&quot;&gt;')[-1].split('&lt')[0] for x_str, x in zip(souplist_str, souplist) if x.find('td', {'class': 'clue_text'}) != None]
+            elif round == 'double_jeopardy_round':
+                results.extend([x_str.split('correct_response&quot;&gt;')[-1].split('&lt')[0] for x_str, x in zip(souplist_str, souplist) if x.find('td', {'class': 'clue_text'}) != None])
+        
+        souplist_fj = self.soup.find('div', {'id': 'final_jeopardy_round'}).find('table', {'class': 'final_round'}).find('td', {'class': 'category'}).find_all('div')
+        for a in souplist_fj:
             try:
                 if re.match('toggle', a['onmouseover']):
                     text = str(a['onmouseover'])
@@ -123,7 +128,6 @@ class EpisodeData(object):
 
         # initialize response arrays based on num_clues
         num_clues = self.get_num_clues()
-        print('num_clues = ', num_clues)
         response_matrix = np.zeros((num_clues, 3))
         q_index = 0
         for round in ['jeopardy_round', 'double_jeopardy_round', 'final_jeopardy_round']:
@@ -142,20 +146,21 @@ class EpisodeData(object):
             else:
                 souplist = self.soup.find('div', {'id': round}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
                 for x in souplist:
-                    responses_table = x.find('div')['onmouseover'].split('<tr>')[-1].split('</tr')[0]
-                    #print('responses_table = ', responses_table)
-                    # Currently fails for a "Triple Stumper" clue. Need to fix this.
-                    for j, cont in enumerate([cont1, cont2, cont3]):
-                        if cont in responses_table:
-                            result = responses_table.split('>' + cont)[0].split('<td class=')[-1]
-                            if result == '"right"':
-                                response_matrix[q_index, j] = 1
+                    clue_text = x.find('td', {'class': 'clue_text'})
+                    if clue_text == None:
+                        continue
+                    else:
+                        responses_table = x.find('div')['onmouseover'].split('<tr>')[-1].split('</tr')[0]
+                        for j, cont in enumerate([cont1, cont2, cont3]):
+                            if cont in responses_table:
+                                result = responses_table.split('>' + cont)[0].split('<td class=')[-1]
+                                if result == '"right"':
+                                    response_matrix[q_index, j] = 1
+                                else:
+                                    response_matrix[q_index, j] = -1
                             else:
-                                response_matrix[q_index, j] = -1
-                        else:
-                            pass
-                    q_index += 1 #keep track of clue number
-        #print('response_matrix = ', response_matrix)
+                                pass
+                        q_index += 1 #keep track of clue number
         return response_matrix
     def get_dollar_amt(self):
         results = []
@@ -163,14 +168,18 @@ class EpisodeData(object):
         for round in ['jeopardy_round', 'double_jeopardy_round']:
             souplist = self.soup.find('div', {'id': round}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
             for x in souplist:
-                try:
-                    results.append(int(x.find('table', {'class': 'clue_header'}).find(
-                        'td', {'class': 'clue_value'}).text.replace('$', '')))
-                except:
-                    results.append(int(x.find('table', {'class': 'clue_header'}).find(
-                        'td', {'class': 'clue_value_daily_double'}).text.replace('DD: ', '').replace('$', '').replace(',','')))
-                    dd_index.append(len(results)-1)
-                continue
+                clue_text = x.find('td', {'class': 'clue_text'})
+                if clue_text == None:
+                    continue
+                else:
+                    try:
+                        results.append(int(x.find('table', {'class': 'clue_header'}).find(
+                            'td', {'class': 'clue_value'}).text.replace('$', '')))
+                    except:
+                        results.append(int(x.find('table', {'class': 'clue_header'}).find(
+                            'td', {'class': 'clue_value_daily_double'}).text.replace('DD: ', '').replace('$', '').replace(',','')))
+                        dd_index.append(len(results)-1)
+                    continue
         num_clues = self.get_num_clues()
         self.dailydouble = self.get_dailydouble(dd_index, num_clues)
         results.append(0) # provide clue value of 0 for FJ question (final scores are extracted for each player)
@@ -180,15 +189,18 @@ class EpisodeData(object):
         for round in ['jeopardy_round', 'double_jeopardy_round']:
             souplist = self.soup.find('div', {'id': round}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
             for x in souplist:
-                if round == 'jeopardy_round':
-                    results.append(int(x.find('table', {'class': 'clue_header'}).find(
-                    'td', {'class': 'clue_order_number'}).text))
-                    num_jr_clues = len(results)
+                clue_text = x.find('td', {'class': 'clue_text'})
+                if clue_text == None:
+                    continue
                 else:
-                    results.append(int(x.find('table', {'class': 'clue_header'}).find(
-                    'td', {'class': 'clue_order_number'}).text) + num_jr_clues)                    
+                    if round == 'jeopardy_round':
+                        results.append(int(x.find('table', {'class': 'clue_header'}).find(
+                        'td', {'class': 'clue_order_number'}).text))
+                        num_jr_clues = len(results)
+                    else:
+                        results.append(int(x.find('table', {'class': 'clue_header'}).find(
+                        'td', {'class': 'clue_order_number'}).text) + num_jr_clues)                    
         results.append(len(results) + 1) # Final Jeopardy question always comes last
-        #print('results = ', results)
         return results
     def get_clue_loc(self):
         xcoord = []
@@ -196,16 +208,19 @@ class EpisodeData(object):
         clue_type = []
         for round in ['jeopardy_round', 'double_jeopardy_round']:
             souplist = self.soup.find('div', {'id': round}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
-            #print('souplist = ', souplist)
             for x in souplist:
-                if round == 'jeopardy_round':
-                    xcoord.append(int(x.find('td', {'class': 'clue_text'})['id'].split('clue_J_')[-1].split('_stuck')[0].split('_')[0]))
-                    ycoord.append(int(x.find('td', {'class': 'clue_text'})['id'].split('clue_J_')[-1].split('_stuck')[0].split('_')[-1]))
-                    clue_type.append(1)
+                clue_text = x.find('td', {'class': 'clue_text'})
+                if clue_text == None:
+                    continue
                 else:
-                    xcoord.append(int(x.find('td', {'class': 'clue_text'})['id'].split('clue_DJ_')[-1].split('_stuck')[0].split('_')[0]))
-                    ycoord.append(int(x.find('td', {'class': 'clue_text'})['id'].split('clue_DJ_')[-1].split('_stuck')[0].split('_')[-1]))
-                    clue_type.append(2)
+                    if round == 'jeopardy_round':
+                        xcoord.append(int(clue_text['id'].split('clue_J_')[-1].split('_stuck')[0].split('_')[0]))
+                        ycoord.append(int(clue_text['id'].split('clue_J_')[-1].split('_stuck')[0].split('_')[-1]))
+                        clue_type.append(1)
+                    else:
+                        xcoord.append(int(clue_text['id'].split('clue_DJ_')[-1].split('_stuck')[0].split('_')[0]))
+                        ycoord.append(int(clue_text['id'].split('clue_DJ_')[-1].split('_stuck')[0].split('_')[-1]))
+                        clue_type.append(2)
         xcoord.append(0) #final jeopardy
         ycoord.append(0) #final jeopardy
         clue_type.append(3)             
@@ -225,8 +240,16 @@ class EpisodeData(object):
     def get_num_clues(self):
         num_clues = 0
         for round in ['jeopardy_round', 'double_jeopardy_round']:
-            souplist = self.soup.find('div', {'id': round}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
-            num_clues += len(souplist)
+            try:
+                souplist = self.soup.find('div', {'id': round}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
+                hidden_clues = 0
+                for x in souplist:
+                    clue_text = x.find('td', {'class': 'clue_text'})
+                    if clue_text == None:
+                        hidden_clues += 1
+                num_clues += len(souplist) - hidden_clues
+            except AttributeError:
+                pass
         return (num_clues + 1) # add FJ clue
     
     def get_contestant_totals(self, clue_value, responses):
@@ -240,30 +263,40 @@ class EpisodeData(object):
         return earnings_matrix_cumsum
 
     def get_final_totals(self):
-        souplist = self.soup.find('div', {'id': 'final_jeopardy_round'}).find_all('td', {'class': 'score_positive'})
-        #print('souplist final scores = ', souplist)
-        try:
-            cont1_final = int(str(souplist).split('$')[1].split('<')[0].replace(',',''))
-            cont2_final = int(str(souplist).split('$')[2].split('<')[0].replace(',',''))
-            cont3_final = int(str(souplist).split('$')[3].split('<')[0].replace(',',''))
-        except:
-            cont1_final = int(str(souplist).split('class="score_positive">')[1].split('<')[0].replace(',',''))
-            cont2_final = int(str(souplist).split('class="score_positive">')[2].split('<')[0].replace(',',''))
-            cont3_final = int(str(souplist).split('class="score_positive">')[3].split('<')[0].replace(',',''))
+        # souplist = self.soup.find('div', {'id': 'final_jeopardy_round'}).find_all('td', {'class': 'score_positive'})
+        # print('souplist = ', souplist)
+        # souplist_neg = self.soup.find('div', {'id': 'final_jeopardy_round'}).find_all('td', {'class': 'score_negative'})
+        # print('souplist_neg = ', souplist_neg)
+        souplist = self.soup.find('div', {'id': 'final_jeopardy_round'})
+        souplist_str = str(souplist)
+        cont1_final = int(re.split('class="score_positive">|class="score_negative">', souplist_str)[1].split('<')[0].replace('$','').replace(',',''))
+        cont2_final = int(re.split('class="score_positive">|class="score_negative">', souplist_str)[2].split('<')[0].replace('$','').replace(',',''))
+        cont3_final = int(re.split('class="score_positive">|class="score_negative">', souplist_str)[3].split('<')[0].replace('$','').replace(',',''))
+        # if len(souplist_neg) == 0:
+        #     try:
+        #         print('souplist = ', souplist)
+        #         cont1_final = int(str(souplist).split('$')[1].split('<')[0].replace(',',''))
+        #         cont2_final = int(str(souplist).split('$')[2].split('<')[0].replace(',',''))
+        #         cont3_final = int(str(souplist).split('$')[3].split('<')[0].replace(',',''))
+        #     except:
+        #         cont1_final = int(str(souplist).split('class="score_positive">')[1].split('<')[0].replace(',',''))
+        #         cont2_final = int(str(souplist).split('class="score_positive">')[2].split('<')[0].replace(',',''))
+        #         cont3_final = int(str(souplist).split('class="score_positive">')[3].split('<')[0].replace(',',''))
+        # else:
+        #     st
+
         final_scores = np.array([cont1_final, cont2_final, cont3_final])
+        print('final_scores = ', final_scores)
         return final_scores
 
     def get_categories_list(self, xcoord, round, categories):
         num_clues = self.get_num_clues()
         categories_list = [[]]*num_clues
-        print()
         for i, (q, r) in enumerate(zip(xcoord, round)):
             if q == 0:
                 categories_list[i] = categories[-1]
             else:
                 if r == 1:
-                    print(i, q)
-                    print(categories_list)
                     categories_list[i] = categories[q - 1]
                 elif r == 2:
                     categories_list[i] = categories[q + 5]
@@ -285,9 +318,8 @@ def extract(episode_data):
     clues =  episode_data.get_clues()
     answers =  episode_data.get_answers()
     dd = episode_data.dailydouble
-    #print('dd = ', dd)
     responses = episode_data.get_responses()
-    contestant_totals = episode_data.get_contestant_totals(clue_value, responses)
+    #contestant_totals = episode_data.get_contestant_totals(clue_value, responses)
 
     show_date = [show_date.strftime('%Y-%m-%d')]*num_clues #Duplicate for all clues
     cont1 = [contestants[0]]*num_clues #Duplicate for all clues
@@ -296,21 +328,40 @@ def extract(episode_data):
     cont1_resp = list(responses[:,0])
     cont2_resp = list(responses[:,1])
     cont3_resp = list(responses[:,2])
+    # cont1_total = list(contestant_totals[:,0])
+    # cont2_total = list(contestant_totals[:,1])
+    # cont3_total = list(contestant_totals[:,2])
+    categories_list = episode_data.get_categories_list(xcoord, round, categories)
+
+    # episode_data = [show_date, cont1, cont2, cont3, xcoord, ycoord, round, clue_number, clue_value, 
+    # categories_list, clues, answers, dd, cont1_resp, cont2_resp, cont3_resp, cont1_total, cont2_total, cont3_total]
+    episode_data_list = [show_date, cont1, cont2, cont3, xcoord, ycoord, round, clue_number, clue_value, 
+    categories_list, clues, answers, dd, cont1_resp, cont2_resp, cont3_resp]   
+    episode_data_list = sort_clues(episode_data_list)
+
+    clue_value = episode_data_list[8]
+    cont1_resp = episode_data_list[-3]
+    cont2_resp = episode_data_list[-2]
+    cont3_resp = episode_data_list[-1]
+    responses = np.array([cont1_resp, cont2_resp, cont3_resp]).T
+
+    contestant_totals = episode_data.get_contestant_totals(clue_value, responses)
     cont1_total = list(contestant_totals[:,0])
     cont2_total = list(contestant_totals[:,1])
     cont3_total = list(contestant_totals[:,2])
-    categories_list = episode_data.get_categories_list(xcoord, round, categories)
-    episode_data = [show_date, cont1, cont2, cont3, xcoord, ycoord, round, clue_number, clue_value, 
-    categories_list, clues, answers, dd, cont1_resp, cont2_resp, cont3_resp, cont1_total, cont2_total, cont3_total]
-    for i, data in enumerate(episode_data):
+    episode_data_list.extend([cont1_total, cont2_total, cont3_total])
+    for i, data in enumerate(episode_data_list):
         print(i, len(data))
-    #print('episode data = ', episode_data[0])
+    return episode_data_list
+
+def sort_clues(episode_data):
+    sort_index = np.argsort(np.array(episode_data[7]))
+    for i, col in enumerate(episode_data):
+        episode_data[i] = [col[i] for i in sort_index]
     return episode_data
 
 def append_data(episode_list, episode_dict, labels):
     for i, value in enumerate(episode_list):
-        #print(i, value)
-        #print('episode_dict col = ', episode_dict[labels[i]])
         episode_dict[labels[i]].extend(value)
     return episode_dict
 
@@ -334,43 +385,65 @@ def main():
     series_list = []
     for series in series_soup:
         series_list.append(series['href'])
-    #print(series_list)
 
     if opt.load_episodes:
         episode_list = load_episode_list('episodes_list.txt')
-        #print(episode_list)
     else:
         episode_list = []
         for series in series_list:
             episodes = get_links(urlroot + series, 'episode')
             episode_list.append(episodes)
+        print('episode_list = ', episode_list)
         save_episode_list(episode_list)
+    episode_count = 0
+    for season in episode_list:
+        episode_count += len(season)
+    print('Scraping a total of', episode_count, 'episodes')
     if opt.debug:
-        series_list = series_list[:2]
-        episode_list = [x[:5] for x in episode_list[:2]]
+        #series_list = series_list[:2]
+        #episode_list = [x[:5] for x in episode_list[:2]]
+        if opt.url != None:
+            episode_list = [opt.url]
+        else:
+            #series_list = series_list[:1]
+            #episode_list = [x[:10] for x in episode_list[:1]]
+            series_list = series_list[7]
+            episode_list = [x for x in episode_list[7:]]
     else:
         pass
+    skipped_episodes = 0
     for i in range(len(series_list)):
         series_episodes = episode_list[i]
+        series_episodes = [x for x in series_episodes if 'showgame' in x] #remove any links not related to episode data
+        scraped_episodes = []
         for episode in series_episodes:
             print('episode = ', episode)
             episode_data = EpisodeData(episode)
-            episode_data = extract(episode_data)
-            #if episode_dict in locals():
             try:
-                episode_dict = append_data(episode_data, episode_dict, labels)
-            #else:
-            except UnboundLocalError:
-                labels = ['show_date', 'contestant1', 'contestant2', 'contestant3',
-                        'x_coord', 'y_coord', 'round', 'clue_number', 'clue_value', 
-                        'category', 'question', 'answer', 'daily_double', 
-                        'cont1_response', 'cont2_response', 'cont3_response',
-                        'earnings1', 'earnings2', 'earnings3']
-                episode_dict = dict.fromkeys(labels, [])
-                for i, col in enumerate(episode_data):
-                    episode_dict[labels[i]] = col
-                    #episode_dict = append_data(episode_data, episode_dict, labels)
+                episode_data = extract(episode_data)
+                try:
+                    episode_dict = append_data(episode_data, episode_dict, labels)
+                except UnboundLocalError:
+                    labels = ['show_date', 'contestant1', 'contestant2', 'contestant3',
+                            'x_coord', 'y_coord', 'round', 'clue_number', 'clue_value', 
+                            'category', 'question', 'answer', 'daily_double', 
+                            'cont1_response', 'cont2_response', 'cont3_response',
+                            'earnings1', 'earnings2', 'earnings3']
+                    episode_dict = dict.fromkeys(labels, [])
+                    for i, col in enumerate(episode_data):
+                        episode_dict[labels[i]] = col
+                        #episode_dict = append_data(episode_data, episode_dict, labels)`
+            except AttributeError:
+                print('Oops! Looks like a formatting anomaly in this episode caused an attribute error! Skipping...')
+                skipped_episodes += 1
+                pass
+            else:
+                df = dict2df(episode_dict)
+                if opt.write_csv:
+                    df2csv(df)
+            scraped_episodes.append(episode)
 
+    print('Total skipped episodes: ', skipped_episodes)
     df = dict2df(episode_dict)
     if opt.write_csv:
         df2csv(df)
