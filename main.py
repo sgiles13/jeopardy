@@ -146,6 +146,7 @@ class EpisodeData(object):
             else:
                 souplist = self.soup.find('div', {'id': round}).find('table', {'class': 'round'}).find_all('td', {'class': 'clue'})
                 for x in souplist:
+<<<<<<< HEAD
                     clue_text = x.find('td', {'class': 'clue_text'})
                     if clue_text == None:
                         continue
@@ -158,6 +159,22 @@ class EpisodeData(object):
                                     response_matrix[q_index, j] = 1
                                 else:
                                     response_matrix[q_index, j] = -1
+=======
+                    if 'Triple Stumper' in x.find('div')['onmouseover']:
+                        for j, cont in enumerate([cont1, cont2, cont3]):
+                            if cont in x.find('div')['onmouseover']:
+                                response_matrix[q_index, j] = -1
+                            else:
+                                pass
+                    responses_table = x.find('div')['onmouseover'].split('<tr>')[-1].split('</tr')[0]
+                    #print('responses_table = ', responses_table)
+                    # Currently fails for a "Triple Stumper" clue. Need to fix this.
+                    for j, cont in enumerate([cont1, cont2, cont3]):
+                        if cont in responses_table:
+                            result = responses_table.split('>' + cont)[0].split('<td class=')[-1]
+                            if result == '"right"':
+                                response_matrix[q_index, j] = 1
+>>>>>>> 0081ee455ab14e6c5f56463793adf694e3982b1a
                             else:
                                 pass
                         q_index += 1 #keep track of clue number
@@ -319,6 +336,10 @@ def extract(episode_data):
     answers =  episode_data.get_answers()
     dd = episode_data.dailydouble
     responses = episode_data.get_responses()
+<<<<<<< HEAD
+=======
+    print('responses = ', responses)
+>>>>>>> 0081ee455ab14e6c5f56463793adf694e3982b1a
     #contestant_totals = episode_data.get_contestant_totals(clue_value, responses)
 
     show_date = [show_date.strftime('%Y-%m-%d')]*num_clues #Duplicate for all clues
